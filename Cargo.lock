@@ -29,8 +29,9 @@ dependencies = [
 
 [[package]]
 name = "age-core"
-version = "0.10.0"
-source = "git+https://github.com/str4d/rage.git?rev=baf277a749c839e49f93bffb58d36734ac94be83#baf277a749c839e49f93bffb58d36734ac94be83"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2bf6a89c984ca9d850913ece2da39e1d200563b0a94b002b253beee4c5acf99"
 dependencies = [
  "base64 0.21.7",
  "chacha20poly1305",
@@ -39,15 +40,16 @@ dependencies = [
  "io_tee",
  "nom",
  "rand",
- "secrecy",
+ "secrecy 0.10.3",
  "sha2",
  "tempfile",
 ]
 
 [[package]]
 name = "age-plugin"
-version = "0.5.0"
-source = "git+https://github.com/str4d/rage.git?rev=baf277a749c839e49f93bffb58d36734ac94be83#baf277a749c839e49f93bffb58d36734ac94be83"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8a31f37914cf72cf36a1cd8ea9f24e5df20899e9348dd3d1c8273f4420ce493"
 dependencies = [
  "age-core",
  "base64 0.21.7",
@@ -1018,7 +1020,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.4.10",
+ "socket2 0.5.7",
  "tokio",
  "tower-service",
  "tracing",
@@ -2077,6 +2079,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "secrecy"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e891af845473308773346dc847b2c23ee78fe442e0472ac50e22a18a93d3ae5a"
+dependencies = [
+ "zeroize",
+]
+
+[[package]]
 name = "security-framework"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3026,7 +3037,7 @@ dependencies = [
  "pcsc",
  "rand_core",
  "rsa",
- "secrecy",
+ "secrecy 0.8.0",
  "sha1",
  "sha2",
  "subtle",

@@ -3,7 +3,7 @@
 use age_core::{
     format::{FileKey, FILE_KEY_BYTES},
     primitives::{aead_decrypt, hkdf},
-    secrecy::{ExposeSecret, SecretString},
+    secrecy::{zeroize::Zeroize, ExposeSecret, SecretString},
 };
 use age_plugin::{identity, Callbacks};
 use bech32::{ToBase32, Variant};
@@ -332,7 +332,7 @@ pub(crate) fn manage(yubikey: &mut YubiKey) -> Result<(), Error> {
                         .with_prompt(fl!("mgr-choose-new-pin"))
                         .with_confirmation(fl!("mgr-repeat-new-pin"), fl!("mgr-pin-mismatch"))
                         .interact()
-                        .map(|pin| Result::<_, Infallible>::Ok(SecretString::new(pin)))
+                        .map(|pin| Result::<_, Infallible>::Ok(SecretString::from(pin)))
                 },
                 yubikey.serial(),
             )?
@@ -747,12 +747,14 @@ impl Connection {
 
         // A failure to decrypt is fatal, because we assume that we won't
         // encounter 32-bit collisions on the key tag embedded in the header.
-        match aead_decrypt(&enc_key, FILE_KEY_BYTES, &line.encrypted_file_key) {
-            Ok(pt) => Ok(TryInto::<[u8; FILE_KEY_BYTES]>::try_into(&pt[..])
-                .unwrap()
-                .into()),
-            Err(_) => Err(()),
-        }
+        aead_decrypt(&enc_key, FILE_KEY_BYTES, &line.encrypted_file_key)
+            .map_err(|_| ())
+            .map(|mut pt| {
+                FileKey::init_with_mut(|file_key| {
+                    file_key.copy_from_slice(&pt);
+                    pt.zeroize();
+                })
+            })
     }
 
     /// Close this connection without resetting the YubiKey.
