@@ -1,7 +1,7 @@
 use age_core::{
-    format::{FileKey, Stanza},
-    primitives::aead_encrypt,
-    secrecy::ExposeSecret,
+    format::{FileKey, Stanza, FILE_KEY_BYTES},
+    primitives::{aead_decrypt, aead_encrypt, hkdf},
+    secrecy::{zeroize::Zeroize, ExposeSecret},
 };
 use base64::{prelude::BASE64_STANDARD_NO_PAD, Engine};
 use p256::{
@@ -11,8 +11,9 @@ use p256::{
 use rand::rngs::OsRng;
 use sha2::Sha256;
 
-use crate::{p256::Recipient, STANZA_TAG};
+use crate::{key::Connection, p256::Recipient};
 
+const STANZA_TAG: &str = "piv-p256";
 pub(crate) const STANZA_KEY_LABEL: &[u8] = b"piv-p256";
 
 const TAG_BYTES: usize = 4;
@@ -117,9 +118,7 @@ impl RecipientLine {
 
         let shared_secret = esk.diffie_hellman(pk.public_key());
 
-        let mut salt = vec![];
-        salt.extend_from_slice(epk_bytes.as_bytes());
-        salt.extend_from_slice(pk.to_encoded().as_bytes());
+        let salt = salt(&epk_bytes, pk);
 
         let enc_key = {
             let mut okm = [0; 32];
@@ -142,4 +141,34 @@ impl RecipientLine {
             encrypted_file_key,
         }
     }
+
+    pub(crate) fn unwrap_file_key(&self, conn: &mut Connection) -> Result<FileKey, ()> {
+        assert_eq!(self.tag, conn.recipient().tag());
+
+        // The YubiKey API for performing scalar multiplication takes the point in its
+        // uncompressed SEC-1 encoding.
+        let shared_secret = conn.p256_ecdh(self.epk_bytes.decompress().as_bytes())?;
+
+        let salt = salt(&self.epk_bytes, conn.recipient());
+
+        let enc_key = hkdf(&salt, STANZA_KEY_LABEL, shared_secret.as_ref());
+
+        // A failure to decrypt is fatal, because we assume that we won't
+        // encounter 32-bit collisions on the key tag embedded in the header.
+        aead_decrypt(&enc_key, FILE_KEY_BYTES, &self.encrypted_file_key)
+            .map_err(|_| ())
+            .map(|mut pt| {
+                FileKey::init_with_mut(|file_key| {
+                    file_key.copy_from_slice(&pt);
+                    pt.zeroize();
+                })
+            })
+    }
+}
+
+fn salt(epk_bytes: &EphemeralKeyBytes, pk: &Recipient) -> Vec<u8> {
+    let mut salt = vec![];
+    salt.extend_from_slice(epk_bytes.as_bytes());
+    salt.extend_from_slice(pk.to_encoded().as_bytes());
+    salt
 }

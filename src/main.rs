@@ -28,7 +28,6 @@ const PLUGIN_NAME: &str = "yubikey";
 const BINARY_NAME: &str = "age-plugin-yubikey";
 const RECIPIENT_PREFIX: &str = "age1yubikey";
 const IDENTITY_PREFIX: &str = "age-plugin-yubikey-";
-const STANZA_TAG: &str = "piv-p256";
 
 const USABLE_SLOTS: [RetiredSlotId; 20] = [
     RetiredSlotId::R1,
