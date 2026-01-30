@@ -145,6 +145,44 @@ likely be implemented as a separate age plugin that interacts with
 [`yubikey-agent`](https://github.com/FiloSottile/yubikey-agent), enabling
 YubiKeys to be used simultaneously with age and SSH.
 
+### PIN caching
+
+`age-plugin-yubikey` supports optional filesystem-backed PIN caching to avoid
+repeated manual entry. This is particularly useful for YubiKey 4 series devices,
+which cannot retain PIN state internally, or in environments where the PIV
+applet state is frequently reset.
+
+**Security warning:** Enabling this feature stores your PIN in **plaintext**.
+Carefully assess your security risks before enabling it. As part of that
+assessment, make sure to take the following points into account:
+
+- Only enable this feature if the cache directory is located on an encrypted
+  volume, such as FileVault on macOS or LUKS on Linux.
+- **Linux-specific:** If you want the PIN cache to be cleared on reboot and plan
+  to use a location under `/tmp`, be aware that on most modern Linux systems
+  `/tmp` is backed by `tmpfs`. This allows its contents to be swapped, which
+  means memory pages containing the PIN may be written to disk. To mitigate this
+  risk, ensure that swap is encrypted. Alternatively, use `ramfs` to guarantee
+  that the cache remains strictly in memory and is cleared on reboot.
+
+To enable PIN caching, set the `APYK_CACHED_PINS` environment variable to the
+directory where cached PINs should be stored:
+
+```bash
+export APYK_CACHED_PINS="${XDG_STATE_HOME:-$HOME/.local/state}/age-plugin-yubikey"
+```
+
+**What to expect with PIN caching:**
+
+- When enabled, the plugin attempts to read the PIN from the cache before
+  prompting you.
+- If a cached PIN is invalid, for example because the PIN was changed, the
+  plugin clears the cache and prompts for a new PIN.
+- On Unix-like systems, the plugin automatically enforces strict permissions:
+  the cache directory is set to `0700` (rwx------) and the PIN files are
+  created with `0600` (rw-------).
+- If the environment variable is not set, PINs are never written to disk.
+
 ### Manual setup and technical details
 
 `age-plugin-yubikey` only officially supports the following YubiKey variants,

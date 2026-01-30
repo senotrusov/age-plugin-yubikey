@@ -6,9 +6,12 @@ use bech32::{ToBase32, Variant};
 use dialoguer::Password;
 use log::{debug, error, warn};
 use std::convert::Infallible;
+use std::env;
 use std::fmt;
+use std::fs;
 use std::io;
 use std::iter;
+use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime};
 use yubikey::{
@@ -28,6 +31,7 @@ use crate::{
 
 const ONE_SECOND: Duration = Duration::from_secs(1);
 const FIFTEEN_SECONDS: Duration = Duration::from_secs(15);
+const CACHED_PINS_ENV: &str = "APYK_CACHED_PINS";
 
 pub(crate) fn is_connected(reader: Reader) -> bool {
     filter_connected(&reader)
@@ -291,6 +295,123 @@ fn request_pin<E, E2>(
             },
             Err(e) => break Ok(Err(e)),
         });
+    }
+}
+
+// Helper functions for PIN caching
+
+fn get_cache_file_path(serial: Serial) -> Option<PathBuf> {
+    let env_path = env::var_os(CACHED_PINS_ENV)?;
+    let mut path = PathBuf::from(env_path);
+
+    if !path.exists() {
+        if let Err(e) = fs::create_dir_all(&path) {
+            eprintln!(
+                "{}",
+                fl!(
+                    "plugin-err-cache-dir-create",
+                    path = path.to_string_lossy().to_string(),
+                    err = e.to_string()
+                )
+            );
+            return None;
+        }
+    }
+
+    path.push(format!("cached-pins.{}", serial));
+    Some(path)
+}
+
+fn read_cached_pin(serial: Serial) -> Option<SecretString> {
+    let path = get_cache_file_path(serial)?;
+    match fs::read_to_string(&path) {
+        Ok(s) => Some(SecretString::from(s.trim().to_owned())),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => {
+            eprintln!(
+                "{}",
+                fl!(
+                    "plugin-err-cache-read",
+                    path = path.to_string_lossy().to_string(),
+                    err = e.to_string()
+                )
+            );
+            None
+        }
+    }
+}
+
+fn write_cached_pin(serial: Serial, pin: &SecretString) {
+    if let Some(path) = get_cache_file_path(serial) {
+        // We ensure directory permissions here, only on write.
+        if let Some(parent) = path.parent() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+                let check_and_fix_perms = || -> io::Result<()> {
+                    let metadata = fs::metadata(parent)?;
+                    let mode = metadata.mode();
+                    // Check if the permissions are exactly 700 (rwx------), ignoring
+                    // SUID, SGID, and sticky bits (the high bits).
+                    if (mode & 0o777) != 0o700 {
+                        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+                    }
+                    Ok(())
+                };
+
+                if let Err(e) = check_and_fix_perms() {
+                    eprintln!(
+                        "{}",
+                        fl!(
+                            "plugin-err-cache-dir-perms",
+                            path = parent.to_string_lossy().to_string(),
+                            err = e.to_string()
+                        )
+                    );
+                }
+            }
+        }
+
+        // We use a closure to handle the result so we can log errors easily.
+        let write_result = || -> io::Result<()> {
+            #[cfg(unix)]
+            {
+                use std::fs::OpenOptions;
+                use std::io::Write;
+                use std::os::unix::fs::OpenOptionsExt;
+
+                // Create file with 0600 permissions (User Read/Write only)
+                let mut options = OpenOptions::new();
+                options.write(true).create(true).truncate(true);
+                options.mode(0o600);
+
+                let mut file = options.open(&path)?;
+                file.write_all(pin.expose_secret().as_bytes())?;
+            }
+            #[cfg(not(unix))]
+            {
+                fs::write(&path, pin.expose_secret())?;
+            }
+            Ok(())
+        };
+
+        if let Err(e) = write_result() {
+            eprintln!(
+                "{}",
+                fl!(
+                    "plugin-err-cache-write",
+                    path = path.to_string_lossy().to_string(),
+                    err = e.to_string()
+                )
+            );
+        }
+    }
+}
+
+fn clear_cached_pin(serial: Serial) {
+    if let Some(path) = get_cache_file_path(serial) {
+        let _ = fs::remove_file(path);
     }
 }
 
@@ -660,13 +781,35 @@ impl Connection {
             _ => (),
         }
 
-        // The policy requires a PIN, so request it.
+        let mut initial_error: Option<String> = None;
+
+        // Try to retrieve PIN from temporary cache first
+        if let Some(cached_pin) = read_cached_pin(self.yubikey.serial()) {
+            match self.yubikey.verify_pin(cached_pin.expose_secret().as_bytes()) {
+                Ok(_) => return Ok(Ok(())),
+                Err(_) => {
+                    // Verification failed; the cache is invalid.
+                    // Clear it and store the error to display it in the prompt.
+                    clear_cached_pin(self.yubikey.serial());
+                    initial_error = Some(fl!(
+                        "plugin-err-cached-pin-invalid",
+                        yubikey_serial = self.yubikey.serial().to_string()
+                    ));
+                }
+            }
+        }
+
+        // The policy requires a PIN (or cache failed), so request it.
         let pin = match request_pin(
             |prev_error| {
+                // If there is a previous error from the loop (user typed wrong PIN), use that.
+                // Otherwise, use the initial cache error (if it exists).
+                let display_error = prev_error.or(initial_error.clone());
+
                 callbacks.request_secret(&format!(
                     "{}{}{}",
-                    prev_error.as_deref().unwrap_or(""),
-                    prev_error.as_deref().map(|_| " ").unwrap_or(""),
+                    display_error.as_deref().unwrap_or(""),
+                    display_error.as_deref().map(|_| " ").unwrap_or(""),
                     fl!(
                         "plugin-enter-pin",
                         yubikey_serial = self.yubikey.serial().to_string(),
@@ -692,6 +835,10 @@ impl Connection {
                 message: format!("{:?}", Error::YubiKey(e)),
             }));
         }
+
+        // Verification successful; cache the PIN.
+        write_cached_pin(self.yubikey.serial(), &pin);
+
         Ok(Ok(()))
     }
 

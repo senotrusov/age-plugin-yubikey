@@ -163,10 +163,15 @@ builder-touch-yk = 👆 Please touch the {-yubikey}
 
 ## Plugin usage
 
-plugin-err-invalid-recipient = Invalid recipient
-plugin-err-invalid-identity  = Invalid {-yubikey} stub
-plugin-err-invalid-stanza    = Invalid {-yubikey} stanza
-plugin-err-decryption-failed = Failed to decrypt {-yubikey} stanza
+plugin-err-invalid-recipient  = Invalid recipient
+plugin-err-invalid-identity   = Invalid {-yubikey} stub
+plugin-err-invalid-stanza     = Invalid {-yubikey} stanza
+plugin-err-decryption-failed  = Failed to decrypt {-yubikey} stanza
+plugin-err-cached-pin-invalid = Cached PIN for {-yubikey} with serial {$yubikey_serial} was invalid and has been cleared.
+plugin-err-cache-dir-create   = Failed to create cache directory '{$path}': {$err}
+plugin-err-cache-dir-perms    = Failed to set permissions on cache directory '{$path}': {$err}
+plugin-err-cache-read         = Failed to read from cache file '{$path}': {$err}
+plugin-err-cache-write        = Failed to write to cache file '{$path}': {$err}
 
 plugin-insert-yk            = Please insert {-yubikey} with serial {$yubikey_serial}
 plugin-yk-is-plugged-in     = {-yubikey} is plugged in
